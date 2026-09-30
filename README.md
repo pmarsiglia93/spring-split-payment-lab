@@ -1,5 +1,8 @@
 # Spring Split Payment Lab
 
+[![CI](https://github.com/pmarsiglia93/spring-split-payment-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/pmarsiglia93/spring-split-payment-lab/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/pmarsiglia93/spring-split-payment-lab/actions/workflows/codeql.yml/badge.svg)](https://github.com/pmarsiglia93/spring-split-payment-lab/actions/workflows/codeql.yml)
+
 Projeto full stack de estudo para reproduzir e explicar problemas comuns em arquiteturas de microsserviços: comunicação síncrona, timeout, retry, circuit breaker, idempotência, correlation ID e Saga com orquestração e compensação.
 
 O laboratório processa um pagamento de marketplace, separa 90% para o vendedor e 10% para a plataforma e registra a transferência. A interface permite executar falhas controladas e observar o estado final da Saga.
@@ -29,7 +32,7 @@ O objetivo não é afirmar que esta é a única arquitetura possível. O projeto
 | Consultar uma transação | Estado final continua disponível | Persistência e diagnóstico |
 | Buscar o protocolo nos logs | Mesmo ID em serviços diferentes | Correlation ID |
 
-Para estudar a implementação por etapas e se preparar para explicá-la, veja o [Guia de estudo](docs/GUIA-DE-ESTUDO.md).
+Para estudar a implementação por etapas, veja o [Guia de estudo](docs/GUIA-DE-ESTUDO.md). As respostas ligadas às perguntas da entrevista estão no [FAQ da entrevista técnica](docs/FAQ-ENTREVISTA.md).
 
 ## Arquitetura
 
@@ -66,6 +69,30 @@ flowchart LR
 - Saga com orquestração e compensação
 - Correlation ID propagado entre serviços
 - React, Vite, Nginx e Docker Compose
+
+## Estado atual e roadmap
+
+O repositório diferencia o que já pode ser demonstrado do que ainda é uma evolução. Itens do roadmap não são apresentados como funcionalidades prontas.
+
+### Implementado e verificável
+
+- fluxo full stack executável com Docker Compose;
+- idempotência, Saga, timeout, retry, circuit breaker e compensação;
+- testes unitários com JUnit 5 e Mockito;
+- testes do contrato HTTP com MockMvc;
+- testes de integração do Repository com MongoDB via Testcontainers;
+- CI para backend e frontend;
+- análise estática com CodeQL;
+- atualização de dependências monitorada pelo Dependabot.
+
+### Próximas evoluções
+
+- autenticação JWT e autorização por proprietário da transação;
+- teste de concorrência e proteção da Saga com locking;
+- métricas, dashboards e tracing distribuído;
+- rate limiting e testes de carga;
+- mensageria e Outbox Pattern;
+- experimento de arquitetura hexagonal no `payment-service`.
 
 ## Executar tudo
 
@@ -144,6 +171,8 @@ Isso permite seguir uma mesma requisição atravessando processos diferentes.
 
 Backend completo:
 
+> Docker deve estar ativo porque o teste de integração cria um MongoDB temporário com Testcontainers.
+
 ```bash
 mvn test
 ```
@@ -156,7 +185,17 @@ npm install
 npm run build
 ```
 
-Os testes cobrem regras do payment, cálculo do split e os caminhos de conclusão e compensação do orquestrador. MongoDB não é acessado pelos testes unitários.
+Os testes cobrem três níveis no `payment-service`:
+
+- `PaymentServiceTest`: regra isolada com JUnit 5 e Mockito;
+- `PaymentControllerTest`: contrato HTTP com MockMvc;
+- `PaymentRepositoryIntegrationTest`: consultas e índice único em um MongoDB descartável.
+
+Para executar somente os testes unitários, sem Testcontainers:
+
+```bash
+mvn -pl payment-service -Dtest=PaymentServiceTest test
+```
 
 ## API principal
 
@@ -192,7 +231,7 @@ curl http://localhost:8080/api/payment-flows/tx-demo-123
 
 ## Limitações intencionais
 
-Este é um laboratório, não um sistema financeiro pronto para produção. Para evoluí-lo seriam necessários autenticação, autorização entre serviços, secrets, tracing distribuído, métricas e alertas, outbox/event broker, locking ou insert atômico para concorrência, política de recuperação manual e testes de integração com Testcontainers.
+Este é um laboratório, não um sistema financeiro pronto para produção. Para evoluí-lo seriam necessários autenticação, autorização entre serviços, secrets, tracing distribuído, métricas e alertas, outbox/event broker, locking ou insert atômico para concorrência e política de recuperação manual.
 
 O guia [docs/learning-guide.md](docs/learning-guide.md) relaciona cada cenário às perguntas de entrevista.
 
