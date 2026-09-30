@@ -4,6 +4,33 @@ Projeto full stack de estudo para reproduzir e explicar problemas comuns em arqu
 
 O laboratório processa um pagamento de marketplace, separa 90% para o vendedor e 10% para a plataforma e registra a transferência. A interface permite executar falhas controladas e observar o estado final da Saga.
 
+> Este projeto nasceu depois de uma entrevista técnica. Em vez de apenas decorar respostas, a proposta foi construir um ambiente reproduzível para investigar as perguntas, testar hipóteses e explicar as decisões com evidências.
+
+## Demonstração em 5 minutos
+
+1. Execute `docker compose up --build` e abra `http://localhost:3000`.
+2. Mostre que o frontend chama somente o orquestrador e explique a responsabilidade de cada serviço.
+3. Rode **Fluxo saudável**: a Saga deve terminar como `COMPLETED`.
+4. Clique novamente em **Executar Saga** sem trocar os identificadores: a mesma Saga é devolvida, demonstrando idempotência.
+5. Gere uma **Nova ID** e rode **Falha + compensação**: o resultado deve ser `COMPENSATED`.
+6. Gere outra ID e rode **Timeout + retry** por último: a espera é limitada, novas tentativas ocorrem e o circuito abre temporariamente.
+7. Copie o `Correlation ID` do resultado e procure-o nos logs para acompanhar a requisição entre serviços.
+
+O objetivo não é afirmar que esta é a única arquitetura possível. O projeto demonstra capacidade de decompor um problema, tornar falhas observáveis e discutir os trade-offs de cada solução.
+
+### O que observar
+
+| Ação | Evidência | Conceito validado |
+|---|---|---|
+| Executar o fluxo saudável | Status `COMPLETED` e todas as etapas verdes | Orquestração e separação de responsabilidades |
+| Repetir a mesma requisição | Mesmo registro, sem novo efeito financeiro | Idempotência |
+| Simular falha na transferência | Status `COMPENSATED` | Saga e compensação |
+| Simular lentidão no split | Status `FAILED` após tentativas limitadas | Timeout, retry e circuit breaker |
+| Consultar uma transação | Estado final continua disponível | Persistência e diagnóstico |
+| Buscar o protocolo nos logs | Mesmo ID em serviços diferentes | Correlation ID |
+
+Para estudar a implementação por etapas e se preparar para explicá-la, veja o [Guia de estudo](docs/GUIA-DE-ESTUDO.md).
+
 ## Arquitetura
 
 ```mermaid
@@ -49,6 +76,8 @@ docker compose up --build
 ```
 
 Abra [http://localhost:3000](http://localhost:3000).
+
+Na primeira execução, aguarde cerca de 30 segundos para a inicialização do Spring Boot. Um `502 Bad Gateway` nesse intervalo significa apenas que o frontend já subiu, mas o orquestrador ainda não está pronto.
 
 Portas locais:
 
