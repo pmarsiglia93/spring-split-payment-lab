@@ -26,6 +26,11 @@ public class PaymentClient {
                 .retrieve().toBodilessEntity();
     }
 
+    public void ping() {
+        restClient.get().uri("/actuator/health/readiness")
+                .retrieve().toBodilessEntity();
+    }
+
     private record CreatePaymentRequest(
             String transactionId,
             BigDecimal amount,

@@ -6,5 +6,9 @@ RUN mvn -q -DskipTests package
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
+RUN groupadd --system spring && useradd --system --gid spring spring
 COPY --from=build /workspace/target/orchestrator-service-*.jar app.jar
+RUN chown spring:spring app.jar
+USER spring:spring
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0 -XX:+UseSerialGC -XX:TieredStopAtLevel=1"
 ENTRYPOINT ["java", "-jar", "app.jar"]

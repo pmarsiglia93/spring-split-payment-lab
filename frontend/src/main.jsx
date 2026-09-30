@@ -10,6 +10,12 @@ const scenarios = [
 
 const CIRCUIT_COOLDOWN_MS = 10_000
 const CIRCUIT_STORAGE_KEY = 'splitCircuitCooldownUntil'
+const readinessLabels = {
+  orchestrator: 'Orquestrador',
+  payment: 'Pagamento',
+  split: 'Divisão',
+  transfer: 'Transferência'
+}
 
 const serviceRoles = [
   { name: 'Frontend', icon: '01', role: 'Coleta os dados e mostra o resultado. Só conversa com o orquestrador.' },
@@ -103,6 +109,19 @@ function newIdentifiers() {
   return { transactionId: `tx-${suffix}`, idempotencyKey: `key-${crypto.randomUUID()}` }
 }
 
+async function fetchLabReadiness() {
+  const response = await fetch('/api/lab/readiness', {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(10_000)
+  })
+  if (!response.ok) throw new Error('environment is starting')
+  return response.json()
+}
+
+function wait(milliseconds) {
+  return new Promise(resolve => window.setTimeout(resolve, milliseconds))
+}
+
 function App() {
   const [ids, setIds] = useState(newIdentifiers)
   const [amount, setAmount] = useState('100.00')
@@ -114,9 +133,36 @@ function App() {
   const [cooldownUntil, setCooldownUntil] = useState(() => Number(window.localStorage.getItem(CIRCUIT_STORAGE_KEY)) || 0)
   const [clock, setClock] = useState(Date.now)
   const [resilienceStatus, setResilienceStatus] = useState(null)
+  const [labReadiness, setLabReadiness] = useState({
+    ready: false,
+    services: { orchestrator: 'STARTING', payment: 'STARTING', split: 'STARTING', transfer: 'STARTING' }
+  })
   const cooldownMs = Math.max(0, cooldownUntil - clock)
   const cooldownSeconds = Math.ceil(cooldownMs / 1000)
   const circuitProtected = cooldownMs > 0
+  const labReady = labReadiness.ready
+
+  useEffect(() => {
+    let active = true
+    let retryTimer
+
+    async function checkReadiness() {
+      try {
+        const snapshot = await fetchLabReadiness()
+        if (!active) return
+        setLabReadiness(snapshot)
+        if (!snapshot.ready) retryTimer = window.setTimeout(checkReadiness, 2500)
+      } catch {
+        if (active) retryTimer = window.setTimeout(checkReadiness, 2500)
+      }
+    }
+
+    checkReadiness()
+    return () => {
+      active = false
+      window.clearTimeout(retryTimer)
+    }
+  }, [])
 
   useEffect(() => {
     if (!cooldownUntil) return undefined
@@ -133,17 +179,35 @@ function App() {
   }, [cooldownUntil])
 
   useEffect(() => {
+    if (!labReady) return undefined
     loadResilienceStatus()
     if (!circuitProtected) return undefined
     const statusTimer = window.setInterval(loadResilienceStatus, 1000)
     return () => window.clearInterval(statusTimer)
-  }, [circuitProtected])
+  }, [circuitProtected, labReady])
 
   function activateCircuitCooldown() {
     const until = Date.now() + CIRCUIT_COOLDOWN_MS
     window.localStorage.setItem(CIRCUIT_STORAGE_KEY, String(until))
     setCooldownUntil(until)
     setClock(Date.now())
+  }
+
+  async function warmUpLab() {
+    setLabReadiness(current => ({ ...current, ready: false }))
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        const snapshot = await fetchLabReadiness()
+        setLabReadiness(snapshot)
+        if (snapshot.ready) return
+      } catch {
+        // O próximo ciclo tenta novamente enquanto as instâncias acordam.
+      }
+      await wait(1500)
+    }
+
+    throw new Error('O ambiente demorou para iniciar. Aguarde alguns segundos e tente novamente.')
   }
 
   async function loadResilienceStatus() {
@@ -161,8 +225,10 @@ function App() {
     setError('')
     setResult(null)
     setElapsedMs(null)
-    const startedAt = performance.now()
+    let startedAt
     try {
+      await warmUpLab()
+      startedAt = performance.now()
       const response = await fetch('/api/payment-flows', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -178,7 +244,7 @@ function App() {
     } catch (cause) {
       setError(cause.message)
     } finally {
-      setElapsedMs(performance.now() - startedAt)
+      if (startedAt) setElapsedMs(performance.now() - startedAt)
       setLoading(false)
     }
   }
@@ -213,12 +279,31 @@ function App() {
       <h1>Split Payment <span>Resilience Lab</span></h1>
       <p className="subtitle">Execute falhas reais e acompanhe como timeout, retry, circuit breaker,
         idempotência e compensação afetam uma Saga distribuída.</p>
+      <p className="demo-notice">Ambiente demonstrativo · use somente dados fictícios</p>
       <div className="architecture">
         {['Frontend', 'Orchestrator', 'Payment', 'Split', 'Transfer'].map((item, index) =>
           <React.Fragment key={item}><div>{item}</div>{index < 4 && <b>→</b>}</React.Fragment>)}
       </div>
       <a className="faq-shortcut" href="#faq">Ver FAQ da entrevista <span>↓</span></a>
     </header>
+
+    <section className={`environment-status ${labReady ? 'ready' : 'warming'}`} role="status" aria-live="polite">
+      <div className="environment-copy">
+        <i></i>
+        <div>
+          <strong>{labReady ? 'Laboratório pronto para testar' : 'Preparando o laboratório…'}</strong>
+          <p>{labReady
+            ? 'Os quatro serviços responderam. Você já pode executar os experimentos.'
+            : 'Instâncias gratuitas podem levar alguns segundos para acordar. Os testes serão liberados automaticamente.'}</p>
+        </div>
+      </div>
+      <div className="service-readiness">
+        {Object.entries(readinessLabels).map(([service, label]) => {
+          const up = labReadiness.services?.[service] === 'UP'
+          return <span className={up ? 'up' : 'starting'} key={service}><b>{up ? '✓' : '·'}</b>{label}</span>
+        })}
+      </div>
+    </section>
 
     <section className="purpose">
       <p className="eyebrow">POR QUE ESTE PROJETO EXISTE?</p>
@@ -235,10 +320,10 @@ function App() {
     <section className="workspace">
       <form className="panel" onSubmit={run}>
         <div className="panel-title"><span>01</span><div><h2>Configure o experimento</h2><p>Cada cenário executa chamadas reais entre contêineres.</p></div></div>
-        <label>Transaction ID<input value={ids.transactionId} onChange={e => setIds({ ...ids, transactionId: e.target.value })} />
+        <label>Transaction ID<input maxLength="64" value={ids.transactionId} onChange={e => setIds({ ...ids, transactionId: e.target.value })} />
           <small className="field-help">Identifica a operação de negócio do início ao fim.</small></label>
         <label>Valor do pagamento<input type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></label>
-        <label>Idempotency key<input value={ids.idempotencyKey} onChange={e => setIds({ ...ids, idempotencyKey: e.target.value })} />
+        <label>Idempotency key<input maxLength="100" value={ids.idempotencyKey} onChange={e => setIds({ ...ids, idempotencyKey: e.target.value })} />
           <small className="field-help">Repita esta chave para provar que o efeito não será duplicado.</small></label>
         <div className="scenario-heading"><strong>Escolha o comportamento</strong><span>falhas intencionais</span></div>
         <div className="scenario-grid">
@@ -255,8 +340,8 @@ function App() {
           <div className="cooldown-progress" aria-hidden="true"><span style={{ width: Math.min(100, (cooldownMs / CIRCUIT_COOLDOWN_MS) * 100) + '%' }}></span></div>
         </div>}
         <div className="actions">
-          <button className="primary" disabled={loading || circuitProtected}>{loading ? 'Executando…' : circuitProtected ? 'Aguarde ' + cooldownSeconds + 's' : 'Executar Saga'}</button>
-          <button type="button" className="secondary" onClick={findExisting} disabled={loading}>Consultar</button>
+          <button className="primary" disabled={loading || circuitProtected || !labReady}>{!labReady ? 'Preparando ambiente…' : loading ? 'Executando…' : circuitProtected ? 'Aguarde ' + cooldownSeconds + 's' : 'Executar Saga'}</button>
+          <button type="button" className="secondary" onClick={findExisting} disabled={loading || !labReady}>Consultar</button>
           <button type="button" className="ghost" onClick={reset}>Nova ID</button>
         </div>
         {loading && <div className="running"><i></i><div><strong>Microsserviços conversando…</strong><p>O orquestrador está coordenando as etapas e registrando o estado da Saga.</p></div></div>}

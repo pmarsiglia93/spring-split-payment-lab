@@ -26,6 +26,11 @@ public class TransferClient {
                 .retrieve().toBodilessEntity();
     }
 
+    public void ping() {
+        restClient.get().uri("/actuator/health/readiness")
+                .retrieve().toBodilessEntity();
+    }
+
     private record TransferRequest(
             String transactionId,
             BigDecimal sellerAmount,

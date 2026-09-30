@@ -23,6 +23,7 @@ public class Payment {
     @Indexed(unique = true)
     private String idempotencyKey;
 
+    @Indexed(expireAfter = "7d")
     private Instant createdAt;
 
     @Version

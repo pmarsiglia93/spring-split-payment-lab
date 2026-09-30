@@ -14,7 +14,7 @@ public record TransferBatch(
         BigDecimal platformFee,
         TransferStatus status,
         String idempotencyKey,
-        Instant createdAt
+        @Indexed(expireAfter = "7d") Instant createdAt
 ) {
     public TransferBatch compensate() {
         return new TransferBatch(id, transactionId, sellerAmount, platformFee,

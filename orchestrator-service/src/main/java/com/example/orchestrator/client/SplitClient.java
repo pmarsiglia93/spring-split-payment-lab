@@ -23,6 +23,11 @@ public class SplitClient {
                 .retrieve().body(SplitResponse.class);
     }
 
+    public void ping() {
+        restClient.get().uri("/actuator/health/readiness")
+                .retrieve().toBodilessEntity();
+    }
+
     private record SplitRequest(String transactionId, BigDecimal amount, String simulation) {
     }
 

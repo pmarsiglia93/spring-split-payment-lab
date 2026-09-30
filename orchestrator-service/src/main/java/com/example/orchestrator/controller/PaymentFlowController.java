@@ -6,6 +6,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -33,10 +35,10 @@ public class PaymentFlowController {
     }
 
     public record CreateFlowRequest(
-            @NotBlank String transactionId,
+            @NotBlank @Size(max = 64) String transactionId,
             @NotNull @DecimalMin(value = "0", inclusive = false) BigDecimal amount,
-            @NotBlank String idempotencyKey,
-            String simulation
+            @NotBlank @Size(max = 100) String idempotencyKey,
+            @Pattern(regexp = "NONE|SPLIT_TIMEOUT|SPLIT_FAILURE|TRANSFER_FAILURE") String simulation
     ) {
     }
 }

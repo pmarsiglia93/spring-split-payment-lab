@@ -35,6 +35,19 @@ O objetivo não é afirmar que esta é a única arquitetura possível. O projeto
 
 Para estudar a implementação por etapas, veja o [Guia de estudo](docs/GUIA-DE-ESTUDO.md). As respostas ligadas às perguntas da entrevista estão no [FAQ da entrevista técnica](docs/FAQ-ENTREVISTA.md). As decisões sobre crescimento estão em [Escalabilidade: decisões e limites](docs/ESCALABILIDADE.md).
 
+## Demonstração pública no Google Cloud
+
+O repositório está preparado para publicar o frontend no Firebase Hosting e os
+quatro serviços no Cloud Run. No ambiente público, somente o Orchestrator aceita
+tráfego anônimo; ele usa identidade IAM e ID tokens de curta duração para chamar
+Payment, Split e Transfer.
+
+O deploy também configura uma instância máxima por serviço, Secret Manager para a
+URI do MongoDB, rate limit no endpoint de criação, retenção de sete dias e uma tela
+que aguarda os serviços acordarem antes de liberar os experimentos.
+
+Veja o roteiro seguro e incremental em [Publicar no Google Cloud](docs/DEPLOY-GOOGLE-CLOUD.md).
+
 ## Arquitetura
 
 ```mermaid
@@ -90,12 +103,15 @@ O repositório diferencia o que já pode ser demonstrado do que ainda é uma evo
 - proteção concorrente com índices únicos, tratamento de `DuplicateKeyException` e optimistic locking;
 - testes k6 de carga saudável e corrida idempotente;
 - painel frontend e endpoint sanitizado com estado do Resilience4j.
+- preparação de deploy para Cloud Run e Firebase Hosting, com IAM entre serviços;
+- Secret Manager, rate limit do ambiente demonstrativo e expiração automática dos dados;
+- verificação de prontidão para diferenciar cold start das falhas intencionais.
 
 ### Próximas evoluções
 
-- autenticação JWT e autorização por proprietário da transação;
+- autenticação de usuário final e autorização por proprietário da transação;
 - dashboards históricos, alertas e tracing distribuído;
-- rate limiting e bulkhead orientados por métricas;
+- bulkhead orientado por métricas;
 - alta disponibilidade do MongoDB;
 - mensageria e Outbox Pattern quando houver requisito assíncrono;
 - experimento de arquitetura hexagonal no `payment-service`.
@@ -249,7 +265,7 @@ curl http://localhost:8080/api/lab/resilience/split
 
 ## Limitações intencionais
 
-Este é um laboratório, não um sistema financeiro pronto para produção. Ainda faltam autenticação, autorização entre serviços, secrets, tracing distribuído, métricas históricas e alertas, alta disponibilidade do MongoDB, outbox/event broker e política de recuperação manual.
+Este é um laboratório, não um sistema financeiro pronto para produção. O deploy público adiciona IAM entre serviços, Secret Manager, HTTPS, rate limit e retenção limitada, mas ainda faltam autenticação de usuários, autorização por proprietário, tracing distribuído, métricas históricas, alta disponibilidade do MongoDB, outbox/event broker e política de recuperação manual.
 
 O guia [docs/learning-guide.md](docs/learning-guide.md) relaciona cada cenário às perguntas de entrevista.
 

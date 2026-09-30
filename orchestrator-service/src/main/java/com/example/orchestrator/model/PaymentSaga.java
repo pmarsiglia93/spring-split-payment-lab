@@ -18,7 +18,7 @@ public record PaymentSaga(
         Step currentStep,
         String failureReason,
         String correlationId,
-        Instant createdAt,
+        @Indexed(expireAfter = "7d") Instant createdAt,
         Instant updatedAt,
         @Version Long version
 ) {
