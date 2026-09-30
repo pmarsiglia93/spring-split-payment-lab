@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.data.mongo.DataMongoTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -51,6 +52,28 @@ class PaymentRepositoryIntegrationTest {
 
         assertThatThrownBy(() -> paymentRepository.save(payment("transaction-unique", "key-2")))
                 .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    @Test
+    void shouldEnforceUniqueIdempotencyKeyAtDatabaseLevel() {
+        paymentRepository.save(payment("transaction-1", "same-key"));
+
+        assertThatThrownBy(() -> paymentRepository.save(payment("transaction-2", "same-key")))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    @Test
+    void shouldRejectStaleConcurrentUpdate() {
+        Payment saved = paymentRepository.save(payment("transaction-versioned", "key-versioned"));
+        Payment firstCopy = paymentRepository.findById(saved.getId()).orElseThrow();
+        Payment staleCopy = paymentRepository.findById(saved.getId()).orElseThrow();
+
+        firstCopy.updateStatus(PaymentStatus.PROCESSING);
+        paymentRepository.save(firstCopy);
+        staleCopy.updateStatus(PaymentStatus.COMPLETED);
+
+        assertThatThrownBy(() -> paymentRepository.save(staleCopy))
+                .isInstanceOf(OptimisticLockingFailureException.class);
     }
 
     private Payment payment(String transactionId, String idempotencyKey) {

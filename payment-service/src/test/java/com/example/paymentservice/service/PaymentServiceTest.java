@@ -2,6 +2,7 @@ package com.example.paymentservice.service;
 
 import com.example.paymentservice.dto.CreatePaymentRequest;
 import com.example.paymentservice.exception.InvalidPaymentAmountException;
+import com.example.paymentservice.exception.PaymentConflictException;
 import com.example.paymentservice.model.Payment;
 import com.example.paymentservice.model.PaymentStatus;
 import com.example.paymentservice.repository.PaymentRepository;
@@ -13,6 +14,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -38,12 +40,10 @@ class PaymentServiceTest {
 
     @Test
     void shouldCreatePaymentSuccessfully() {
-        CreatePaymentRequest request = new CreatePaymentRequest(
-                "transaction-123",
-                new BigDecimal("150.00"),
-                "key-123"
-        );
+        CreatePaymentRequest request = request("transaction-123", "150.00", "key-123");
         when(paymentRepository.findByTransactionId(request.transactionId()))
+                .thenReturn(Optional.empty());
+        when(paymentRepository.findByIdempotencyKey(request.idempotencyKey()))
                 .thenReturn(Optional.empty());
         when(paymentRepository.save(any(Payment.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -65,11 +65,7 @@ class PaymentServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"0", "-0.01"})
     void shouldRejectAmountLessThanOrEqualToZero(String amount) {
-        CreatePaymentRequest request = new CreatePaymentRequest(
-                "transaction-123",
-                new BigDecimal(amount),
-                "key-123"
-        );
+        CreatePaymentRequest request = request("transaction-123", amount, "key-123");
 
         assertThrows(InvalidPaymentAmountException.class, () -> paymentService.create(request));
 
@@ -78,20 +74,9 @@ class PaymentServiceTest {
     }
 
     @Test
-    void shouldReturnExistingPaymentWhenTransactionIdAlreadyExists() {
-        CreatePaymentRequest request = new CreatePaymentRequest(
-                "transaction-123",
-                new BigDecimal("150.00"),
-                "new-key"
-        );
-        Payment existingPayment = new Payment(
-                "payment-1",
-                request.transactionId(),
-                new BigDecimal("99.90"),
-                PaymentStatus.CREATED,
-                "original-key",
-                Instant.parse("2026-01-01T10:00:00Z")
-        );
+    void shouldReturnExistingPaymentWhenRequestIsExactlyTheSame() {
+        CreatePaymentRequest request = request("transaction-123", "150.00", "key-123");
+        Payment existingPayment = payment("payment-1", "transaction-123", "150.00", "key-123");
         when(paymentRepository.findByTransactionId(request.transactionId()))
                 .thenReturn(Optional.of(existingPayment));
 
@@ -99,5 +84,49 @@ class PaymentServiceTest {
 
         assertSame(existingPayment, result);
         verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldRejectTransactionReusedWithDifferentPaymentData() {
+        CreatePaymentRequest request = request("transaction-123", "150.00", "new-key");
+        Payment existingPayment = payment("payment-1", "transaction-123", "99.90", "original-key");
+        when(paymentRepository.findByTransactionId(request.transactionId()))
+                .thenReturn(Optional.of(existingPayment));
+
+        assertThrows(PaymentConflictException.class, () -> paymentService.create(request));
+
+        verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldReturnWinningPaymentWhenConcurrentInsertLosesTheRace() {
+        CreatePaymentRequest request = request("transaction-race", "100.00", "key-race");
+        Payment winner = payment("winner", "transaction-race", "100.00", "key-race");
+        when(paymentRepository.findByTransactionId(request.transactionId()))
+                .thenReturn(Optional.empty(), Optional.of(winner));
+        when(paymentRepository.findByIdempotencyKey(request.idempotencyKey()))
+                .thenReturn(Optional.empty());
+        when(paymentRepository.save(any(Payment.class)))
+                .thenThrow(new DuplicateKeyException("concurrent insert"));
+
+        Payment result = paymentService.create(request);
+
+        assertSame(winner, result);
+        verify(paymentRepository).save(any(Payment.class));
+    }
+
+    private CreatePaymentRequest request(String transactionId, String amount, String key) {
+        return new CreatePaymentRequest(transactionId, new BigDecimal(amount), key);
+    }
+
+    private Payment payment(String id, String transactionId, String amount, String key) {
+        return new Payment(
+                id,
+                transactionId,
+                new BigDecimal(amount),
+                PaymentStatus.CREATED,
+                key,
+                Instant.parse("2026-01-01T10:00:00Z")
+        );
     }
 }

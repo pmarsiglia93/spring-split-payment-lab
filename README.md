@@ -18,6 +18,7 @@ O laboratório processa um pagamento de marketplace, separa 90% para o vendedor 
 5. Gere uma **Nova ID** e rode **Falha + compensação**: o resultado deve ser `COMPENSATED`.
 6. Gere outra ID e rode **Timeout + retry** por último: a espera é limitada, novas tentativas ocorrem e o circuito abre temporariamente.
 7. Copie o `Correlation ID` do resultado e procure-o nos logs para acompanhar a requisição entre serviços.
+8. Abra o painel **Escalabilidade com evidências** e relacione locking, métricas e teste k6 aos limites conscientes do laboratório.
 
 O objetivo não é afirmar que esta é a única arquitetura possível. O projeto demonstra capacidade de decompor um problema, tornar falhas observáveis e discutir os trade-offs de cada solução.
 
@@ -32,7 +33,7 @@ O objetivo não é afirmar que esta é a única arquitetura possível. O projeto
 | Consultar uma transação | Estado final continua disponível | Persistência e diagnóstico |
 | Buscar o protocolo nos logs | Mesmo ID em serviços diferentes | Correlation ID |
 
-Para estudar a implementação por etapas, veja o [Guia de estudo](docs/GUIA-DE-ESTUDO.md). As respostas ligadas às perguntas da entrevista estão no [FAQ da entrevista técnica](docs/FAQ-ENTREVISTA.md).
+Para estudar a implementação por etapas, veja o [Guia de estudo](docs/GUIA-DE-ESTUDO.md). As respostas ligadas às perguntas da entrevista estão no [FAQ da entrevista técnica](docs/FAQ-ENTREVISTA.md). As decisões sobre crescimento estão em [Escalabilidade: decisões e limites](docs/ESCALABILIDADE.md).
 
 ## Arquitetura
 
@@ -69,6 +70,8 @@ flowchart LR
 - Saga com orquestração e compensação
 - Correlation ID propagado entre serviços
 - React, Vite, Nginx e Docker Compose
+- Concorrência com `@Version`, índices únicos e recuperação da operação vencedora
+- Testes de capacidade e corrida idempotente com k6
 
 ## Estado atual e roadmap
 
@@ -83,15 +86,18 @@ O repositório diferencia o que já pode ser demonstrado do que ainda é uma evo
 - testes de integração do Repository com MongoDB via Testcontainers;
 - CI para backend e frontend;
 - análise estática com CodeQL;
-- atualização de dependências monitorada pelo Dependabot.
+- atualização de dependências monitorada pelo Dependabot;
+- proteção concorrente com índices únicos, tratamento de `DuplicateKeyException` e optimistic locking;
+- testes k6 de carga saudável e corrida idempotente;
+- painel frontend e endpoint sanitizado com estado do Resilience4j.
 
 ### Próximas evoluções
 
 - autenticação JWT e autorização por proprietário da transação;
-- teste de concorrência e proteção da Saga com locking;
-- métricas, dashboards e tracing distribuído;
-- rate limiting e testes de carga;
-- mensageria e Outbox Pattern;
+- dashboards históricos, alertas e tracing distribuído;
+- rate limiting e bulkhead orientados por métricas;
+- alta disponibilidade do MongoDB;
+- mensageria e Outbox Pattern quando houver requisito assíncrono;
 - experimento de arquitetura hexagonal no `payment-service`.
 
 ## Executar tudo
@@ -143,7 +149,7 @@ O `transfer-service` persiste a transferência e responde com erro controlado. O
 
 Resultado esperado: `COMPENSATED`.
 
-Se esse cenário for executado imediatamente depois de abrir o circuit breaker, aguarde 10 segundos ou execute-o antes do cenário de timeout. O bloqueio temporário é parte intencional do experimento.
+Se esse cenário for executado imediatamente depois de abrir o circuit breaker, a interface mostra uma contagem regressiva de 10 segundos e bloqueia somente novas execuções. Consultas continuam disponíveis durante a recuperação.
 
 ## Idempotência
 
@@ -155,7 +161,7 @@ Reutilizar a mesma chave com dados diferentes retorna `409 Conflict`:
 {"error":"Idempotency key was already used with different payment data"}
 ```
 
-Índices únicos no MongoDB preservam a integridade mesmo diante de requisições concorrentes. Em um sistema de produção, também seria necessário tratar explicitamente uma corrida que resulte em `DuplicateKeyException`.
+Índices únicos no MongoDB preservam a integridade mesmo diante de requisições concorrentes. Se duas requisições passarem juntas pela consulta inicial, a perdedora do insert trata `DuplicateKeyException` e recupera a Saga vencedora. Payment e Saga também usam `@Version` para rejeitar atualizações obsoletas.
 
 ## Correlation ID e diagnóstico
 
@@ -185,11 +191,15 @@ npm install
 npm run build
 ```
 
-Os testes cobrem três níveis no `payment-service`:
+Carga e corrida idempotente com k6 são documentadas em [performance/README.md](performance/README.md). Esses testes são manuais porque resultados de desempenho dependem da máquina e não devem tornar o CI determinístico instável.
 
-- `PaymentServiceTest`: regra isolada com JUnit 5 e Mockito;
+A suíte cobre diferentes riscos:
+
+- `PaymentServiceTest` e `PaymentFlowServiceTest`: regras isoladas e corrida de insert com JUnit/Mockito;
 - `PaymentControllerTest`: contrato HTTP com MockMvc;
-- `PaymentRepositoryIntegrationTest`: consultas e índice único em um MongoDB descartável.
+- `PaymentRepositoryIntegrationTest`: consultas, índices únicos e optimistic locking;
+- `PaymentSagaRepositoryIntegrationTest`: identidade única e atualização concorrente da Saga;
+- MongoDB real descartável iniciado pelo Testcontainers.
 
 Para executar somente os testes unitários, sem Testcontainers:
 
@@ -221,6 +231,12 @@ Consultar:
 curl http://localhost:8080/api/payment-flows/tx-demo-123
 ```
 
+Estado sanitizado do Resilience4j:
+
+```bash
+curl http://localhost:8080/api/lab/resilience/split
+```
+
 ## Decisões importantes
 
 - Retry foi aplicado no cálculo do split, uma operação sem efeito financeiro.
@@ -228,10 +244,12 @@ curl http://localhost:8080/api/payment-flows/tx-demo-123
 - O estado da Saga é persistido antes e depois de cada etapa relevante.
 - A compensação é uma nova operação de negócio, não um rollback distribuído de banco.
 - Cada serviço mantém sua própria responsabilidade e não acessa diretamente os dados dos outros.
+- Índices únicos tratam a criação concorrente; @Version protege Payment e Saga contra atualização obsoleta.
+- Capacidade é medida antes de adicionar réplicas ou infraestrutura.
 
 ## Limitações intencionais
 
-Este é um laboratório, não um sistema financeiro pronto para produção. Para evoluí-lo seriam necessários autenticação, autorização entre serviços, secrets, tracing distribuído, métricas e alertas, outbox/event broker, locking ou insert atômico para concorrência e política de recuperação manual.
+Este é um laboratório, não um sistema financeiro pronto para produção. Ainda faltam autenticação, autorização entre serviços, secrets, tracing distribuído, métricas históricas e alertas, alta disponibilidade do MongoDB, outbox/event broker e política de recuperação manual.
 
 O guia [docs/learning-guide.md](docs/learning-guide.md) relaciona cada cenário às perguntas de entrevista.
 

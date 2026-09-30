@@ -1,6 +1,7 @@
 package com.example.paymentservice.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -27,6 +28,23 @@ public class GlobalExceptionHandler {
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request.getRequestURI());
+    }
+
+    @ExceptionHandler(PaymentConflictException.class)
+    public ResponseEntity<ApiError> handleConflict(
+            PaymentConflictException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request.getRequestURI());
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ApiError> handleConcurrentUpdate(HttpServletRequest request) {
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "Payment was modified by another request; reload and retry",
+                request.getRequestURI()
+        );
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

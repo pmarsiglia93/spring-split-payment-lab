@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 
@@ -7,6 +7,9 @@ const scenarios = [
   { value: 'SPLIT_TIMEOUT', label: 'Timeout + retry', expected: 'FAILED', detail: 'O split demora 2,5s; o cliente desiste em 1s e tenta novamente.' },
   { value: 'TRANSFER_FAILURE', label: 'Falha + compensação', expected: 'COMPENSATED', detail: 'A transferência é persistida, falha e depois é compensada.' }
 ]
+
+const CIRCUIT_COOLDOWN_MS = 10_000
+const CIRCUIT_STORAGE_KEY = 'splitCircuitCooldownUntil'
 
 const serviceRoles = [
   { name: 'Frontend', icon: '01', role: 'Coleta os dados e mostra o resultado. Só conversa com o orquestrador.' },
@@ -24,6 +27,69 @@ const glossary = [
   ['Idempotência', 'Garantia de que repetir a mesma solicitação não repete o efeito financeiro.'],
   ['Compensação', 'Nova operação que neutraliza algo já realizado, como um estorno.'],
   ['Correlation ID', 'Número de protocolo usado para encontrar a mesma requisição nos logs de vários serviços.']
+]
+
+const faqEntries = [
+  {
+    question: 'Como você investigaria e corrigiria uma vulnerabilidade?',
+    answer: 'Eu identificaria o componente e a versão afetada, confirmaria se a falha é alcançável, priorizaria por risco e impacto, aplicaria a correção, executaria os testes e monitoraria a publicação.',
+    evidence: 'O repositório usa Dependabot, CodeQL, validação de entrada e respostas de erro sem expor stack trace.',
+    limit: 'Em produção ainda seriam necessários autenticação, TLS, gestão de secrets, rate limiting e testes dinâmicos.'
+  },
+  {
+    question: 'O que foi utilizado para testes automatizados?',
+    answer: 'JUnit 5 e Mockito testam regras isoladas; MockMvc valida HTTP; Testcontainers usa MongoDB real descartável; k6 mede carga e concorrência; Vite valida o frontend.',
+    evidence: 'A suíte Java e o build React rodam no GitHub Actions; os testes k6 são manuais porque desempenho depende do ambiente.',
+    limit: 'Playwright ou Cypress poderiam cobrir a interface, Pact os contratos e OWASP ZAP os testes dinâmicos de segurança.'
+  },
+  {
+    question: 'Como é feita uma consulta no banco de dados?',
+    answer: 'O Controller recebe o HTTP, o Service aplica a regra e o Repository consulta o MongoDB. O Controller nunca acessa o banco diretamente.',
+    evidence: 'O método findByTransactionId do PaymentRepository é interpretado pelo Spring Data e procura o documento pelo transactionId.',
+    limit: 'Consultas reais também precisam considerar índices, paginação, limites e autorização por proprietário.'
+  },
+  {
+    question: 'Este projeto usa arquitetura hexagonal?',
+    answer: 'Não. Ele usa arquitetura em camadas: Controller → Service → Repository. Foi uma escolha consciente para deixar os fundamentos do Spring mais visíveis.',
+    evidence: 'Os pacotes controller, service e repository tornam essa separação explícita em cada microsserviço.',
+    limit: 'Na hexagonal, o domínio define portas e HTTP e MongoDB são adaptadores. Isso aumenta o isolamento, mas também a complexidade.'
+  },
+  {
+    question: 'Como você criaria um novo endpoint?',
+    answer: 'Eu definiria primeiro o caso de uso e o contrato HTTP; depois criaria DTOs e validações, Controller, regra no Service, acesso no Repository se necessário, tratamento de erros, testes e documentação.',
+    evidence: 'GET /payments/{transactionId} demonstra esse caminho e devolve 200 quando encontra ou 404 por meio do GlobalExceptionHandler.',
+    limit: 'Um endpoint de produção também exige autorização, observabilidade, versionamento e avaliação de compatibilidade.'
+  },
+  {
+    question: 'Como o sistema lida com timeout entre microsserviços?',
+    answer: 'O orquestrador limita quanto tempo espera pelo Split. Uma falha temporária pode receber novas tentativas; falhas repetidas abrem o circuit breaker e interrompem chamadas por alguns segundos.',
+    evidence: 'O cenário “Timeout + retry” permite observar esse comportamento e o correlation ID ajuda a seguir a requisição nos logs.',
+    limit: 'Timeout, retry e circuit breaker limitam o impacto; eles não corrigem a causa de um serviço lento.'
+  },
+  {
+    question: 'Como tratar uma falha na orquestração?',
+    answer: 'A Saga registra cada etapa. Se a falha ocorrer antes de um efeito financeiro, termina como FAILED. Se algo já foi registrado, o orquestrador solicita uma compensação e termina como COMPENSATED.',
+    evidence: 'O cenário “Falha + compensação” mostra a transferência falhar e uma nova operação neutralizar o efeito.',
+    limit: 'Compensação não é rollback mágico entre bancos; precisa ser auditável e idempotente.'
+  },
+  {
+    question: 'Como evitar pagamentos duplicados?',
+    answer: 'A mesma idempotency key representa a mesma intenção. Repeti-la devolve a Saga existente em vez de criar outro efeito financeiro.',
+    evidence: 'O Service verifica a chave e o MongoDB possui índice único para proteger também contra requisições concorrentes.',
+    limit: 'Em produção, a violação de unicidade precisa ser tratada para recuperar deterministicamente a operação vencedora.'
+  },
+  {
+    question: 'Como este projeto poderia escalar?',
+    answer: 'Os serviços podem ter várias instâncias atrás de um balanceador porque não dependem de sessão local. Primeiro, porém, é necessário medir o gargalo real.',
+    evidence: 'As responsabilidades já estão separadas, permitindo escalar apenas o serviço que estiver sob maior carga.',
+    limit: 'O laboratório já mede carga com k6 e protege a concorrência com índices únicos e optimistic locking. Dashboards históricos, tracing, alta disponibilidade e mensageria continuam condicionados a uma necessidade real.'
+  },
+  {
+    question: 'O projeto está pronto para produção?',
+    answer: 'Não. Ele é um laboratório didático criado para demonstrar conceitos e decisões arquiteturais de forma reproduzível.',
+    evidence: 'Ele demonstra camadas, testes, MongoDB, comunicação, resiliência, idempotência, Saga e correlation ID.',
+    limit: 'Faltam controles operacionais e de segurança como autenticação, autorização, secrets, TLS, auditoria e observabilidade completa.'
+  }
 ]
 
 const explanations = {
@@ -45,6 +111,49 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [elapsedMs, setElapsedMs] = useState(null)
+  const [cooldownUntil, setCooldownUntil] = useState(() => Number(window.localStorage.getItem(CIRCUIT_STORAGE_KEY)) || 0)
+  const [clock, setClock] = useState(Date.now)
+  const [resilienceStatus, setResilienceStatus] = useState(null)
+  const cooldownMs = Math.max(0, cooldownUntil - clock)
+  const cooldownSeconds = Math.ceil(cooldownMs / 1000)
+  const circuitProtected = cooldownMs > 0
+
+  useEffect(() => {
+    if (!cooldownUntil) return undefined
+    function updateClock() {
+      const currentTime = Date.now()
+      setClock(currentTime)
+      if (currentTime >= cooldownUntil) {
+        window.localStorage.removeItem(CIRCUIT_STORAGE_KEY)
+      }
+    }
+    updateClock()
+    const timer = window.setInterval(updateClock, 250)
+    return () => window.clearInterval(timer)
+  }, [cooldownUntil])
+
+  useEffect(() => {
+    loadResilienceStatus()
+    if (!circuitProtected) return undefined
+    const statusTimer = window.setInterval(loadResilienceStatus, 1000)
+    return () => window.clearInterval(statusTimer)
+  }, [circuitProtected])
+
+  function activateCircuitCooldown() {
+    const until = Date.now() + CIRCUIT_COOLDOWN_MS
+    window.localStorage.setItem(CIRCUIT_STORAGE_KEY, String(until))
+    setCooldownUntil(until)
+    setClock(Date.now())
+  }
+
+  async function loadResilienceStatus() {
+    try {
+      const response = await fetch('/api/lab/resilience/split')
+      if (response.ok) setResilienceStatus(await response.json())
+    } catch {
+      // O laboratório continua utilizável mesmo durante a inicialização do orquestrador.
+    }
+  }
 
   async function run(event) {
     event.preventDefault()
@@ -62,6 +171,10 @@ function App() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Não foi possível executar o fluxo')
       setResult(data)
+      if (data.failureReason?.includes("CircuitBreaker 'splitService' is OPEN")) {
+        activateCircuitCooldown()
+      }
+      loadResilienceStatus()
     } catch (cause) {
       setError(cause.message)
     } finally {
@@ -104,6 +217,7 @@ function App() {
         {['Frontend', 'Orchestrator', 'Payment', 'Split', 'Transfer'].map((item, index) =>
           <React.Fragment key={item}><div>{item}</div>{index < 4 && <b>→</b>}</React.Fragment>)}
       </div>
+      <a className="faq-shortcut" href="#faq">Ver FAQ da entrevista <span>↓</span></a>
     </header>
 
     <section className="purpose">
@@ -135,8 +249,13 @@ function App() {
           </button>)}
         </div>
         <p className="experiment-tip">Dica: execute o timeout por último. O circuit breaker fica aberto por alguns segundos para proteger o sistema.</p>
+        {circuitProtected && <div className="circuit-cooldown" role="status" aria-live="polite">
+          <div className="cooldown-message"><i></i><div><strong>Circuit breaker protegendo o Split · {cooldownSeconds}s</strong>
+            <p>Aguarde a recuperação antes de executar outra Saga. Consultas continuam disponíveis.</p></div></div>
+          <div className="cooldown-progress" aria-hidden="true"><span style={{ width: Math.min(100, (cooldownMs / CIRCUIT_COOLDOWN_MS) * 100) + '%' }}></span></div>
+        </div>}
         <div className="actions">
-          <button className="primary" disabled={loading}>{loading ? 'Executando…' : 'Executar Saga'}</button>
+          <button className="primary" disabled={loading || circuitProtected}>{loading ? 'Executando…' : circuitProtected ? 'Aguarde ' + cooldownSeconds + 's' : 'Executar Saga'}</button>
           <button type="button" className="secondary" onClick={findExisting} disabled={loading}>Consultar</button>
           <button type="button" className="ghost" onClick={reset}>Nova ID</button>
         </div>
@@ -165,6 +284,47 @@ function App() {
       <div className="section-heading"><p className="eyebrow">GLOSSÁRIO SEM “TECNIQUÊS”</p><h2>Conceitos usados no laboratório</h2></div>
       <div className="glossary-grid">
         {glossary.map(([term, meaning]) => <article key={term}><h3>{term}</h3><p>{meaning}</p></article>)}
+      </div>
+    </section>
+
+    <section className="learning-section scalability-section" id="scalability">
+      <div className="section-heading"><p className="eyebrow">ESCALABILIDADE COM EVIDÊNCIAS</p><h2>Crescer sem perder consistência</h2>
+        <p>Antes de adicionar infraestrutura, o laboratório protege a concorrência, mede o comportamento atual e deixa explícito quando uma solução mais complexa seria justificável.</p></div>
+      <div className="resilience-monitor">
+        <div><span>RESILIENCE4J · SPLIT SERVICE</span><h3>Estado observado do circuit breaker</h3>
+          <p>Contadores sanitizados do processo atual. Nenhum dado financeiro ou configuração sensível é exposto.</p></div>
+        <strong className={'circuit-state ' + (resilienceStatus?.circuitState || 'unknown').toLowerCase()}>{resilienceStatus?.circuitState || 'CARREGANDO'}</strong>
+        <dl>
+          <div><dt>Chamadas avaliadas</dt><dd>{resilienceStatus?.bufferedCalls ?? '—'}</dd></div>
+          <div><dt>Falhas</dt><dd>{resilienceStatus?.failedCalls ?? '—'}</dd></div>
+          <div><dt>Bloqueadas</dt><dd>{resilienceStatus?.notPermittedCalls ?? '—'}</dd></div>
+          <div><dt>Taxa de falha</dt><dd>{resilienceStatus && resilienceStatus.failureRate >= 0 ? resilienceStatus.failureRate.toFixed(0) + '%' : 'sem amostra'}</dd></div>
+        </dl>
+      </div>
+      <div className="scaling-grid">
+        <article><span>01 · CONSISTÊNCIA</span><h3>Concorrência protegida</h3><p>Índices únicos resolvem a corrida de criação; optimistic locking impede que uma atualização antiga sobrescreva a mais recente.</p></article>
+        <article><span>02 · CAPACIDADE</span><h3>Medir antes de replicar</h3><p>O roteiro k6 mede taxa de erro e latência p95. Réplicas só fazem sentido depois que um gargalo real for identificado.</p></article>
+        <article><span>03 · ESCALA HORIZONTAL</span><h3>Serviços sem sessão local</h3><p>As instâncias podem crescer atrás de um balanceador, mantendo a identidade financeira protegida no banco compartilhado.</p></article>
+        <article className="boundary-card"><span>04 · LIMITE CONSCIENTE</span><h3>Complexidade sob demanda</h3><p>Kafka, Kubernetes e sharding permanecem fora do laboratório até volume, disponibilidade ou assincronia justificarem o custo.</p></article>
+      </div>
+    </section>
+
+    <section className="learning-section faq-section" id="faq">
+      <div className="section-heading"><p className="eyebrow">FAQ DA ENTREVISTA TÉCNICA</p><h2>Como eu responderia hoje?</h2>
+        <p>Abra cada pergunta para ver uma resposta objetiva, a evidência prática no projeto e o que ainda faltaria em um ambiente de produção.</p></div>
+      <div className="answer-framework">
+        <span>ROTEIRO PARA RESPONDER</span>
+        <p><b>1.</b> Explique o conceito · <b>2.</b> Mostre uma decisão concreta · <b>3.</b> Reconheça limites e próximos passos</p>
+      </div>
+      <div className="faq-list">
+        {faqEntries.map((item, index) => <details key={item.question} open={index === 0}>
+          <summary><span>{String(index + 1).padStart(2, '0')}</span>{item.question}<i>+</i></summary>
+          <div className="faq-answer">
+            <div><strong>Resposta curta</strong><p>{item.answer}</p></div>
+            <div><strong>Como o projeto demonstra</strong><p>{item.evidence}</p></div>
+            <div className="production-note"><strong>Limite / produção</strong><p>{item.limit}</p></div>
+          </div>
+        </details>)}
       </div>
     </section>
 
@@ -199,6 +359,7 @@ function Result({ saga, simulation, elapsedMs }) {
       <div><dt>Valor</dt><dd>R$ {Number(saga.amount).toFixed(2)}</dd></div>
       <div><dt>Etapa atual</dt><dd>{saga.currentStep}</dd></div>
       <div><dt>Correlation ID</dt><dd>{saga.correlationId}</dd></div>
+      <div><dt>Versão da Saga</dt><dd>{saga.version ?? 'legada'}</dd></div>
     </dl>
     {saga.failureReason && <div className="failure"><strong>Falha técnica observada</strong><p>{saga.failureReason}</p></div>}
     <div className="lesson"><span>O que este cenário ensina</span><p>{explanation.lesson}</p></div>

@@ -1,6 +1,7 @@
 package com.example.paymentservice.model;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -18,8 +19,14 @@ public class Payment {
 
     private BigDecimal amount;
     private PaymentStatus status;
+
+    @Indexed(unique = true)
     private String idempotencyKey;
+
     private Instant createdAt;
+
+    @Version
+    private Long version;
 
     protected Payment() {
     }
@@ -62,6 +69,10 @@ public class Payment {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Long getVersion() {
+        return version;
     }
 
     public void updateStatus(PaymentStatus status) {

@@ -1,8 +1,10 @@
 package com.example.orchestrator.model;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 
@@ -17,11 +19,12 @@ public record PaymentSaga(
         String failureReason,
         String correlationId,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        @Version Long version
 ) {
     public PaymentSaga advance(Status newStatus, Step newStep, String reason) {
         return new PaymentSaga(id, transactionId, idempotencyKey, amount, newStatus,
-                newStep, reason, correlationId, createdAt, Instant.now());
+                newStep, reason, correlationId, createdAt, Instant.now(), version);
     }
 
     public enum Status {

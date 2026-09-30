@@ -46,6 +46,7 @@ Usei ferramentas diferentes porque cada nível responde a uma pergunta diferente
 | Unitário | JUnit 5 + Mockito | Regra do Service isolada e interações com dependências |
 | Web | MockMvc + Mockito | Contrato HTTP, validação, JSON, headers e status codes |
 | Integração | Testcontainers + MongoDB | Repository e índices contra o mesmo banco usado pela aplicação |
+| Capacidade e concorrência | k6 | Taxa de erro, latência p95 e uma única Saga sob requisições simultâneas |
 | Build frontend | Vite | Código React pode ser empacotado para produção |
 | Pipeline | GitHub Actions | Verificações são repetidas automaticamente a cada mudança |
 
@@ -56,7 +57,6 @@ Os testes unitários são rápidos e não acessam banco. O teste de integração
 - WireMock para simular APIs externas;
 - Pact para contratos entre microsserviços;
 - Playwright ou Cypress para testes de interface;
-- k6 ou Gatling para carga e concorrência;
 - OWASP ZAP para testes dinâmicos de segurança.
 
 Ter muitos testes não garante qualidade. É necessário testar comportamentos relevantes, evitar dependência entre testes e saber qual risco cada teste cobre.
@@ -168,22 +168,23 @@ Compensação não é apagar registro nem executar rollback entre bancos. É uma
 
 A aplicação recebe uma `idempotencyKey`. Repetir a mesma intenção devolve a Saga já criada, enquanto reutilizar a chave com dados diferentes gera `409 Conflict`.
 
-Além da verificação no Service, o banco precisa de índice único, pois duas requisições simultâneas podem consultar antes de qualquer uma salvar. Em produção, a aplicação também deveria tratar `DuplicateKeyException` e recuperar a operação vencedora de forma determinística.
+Além da verificação no Service, o banco possui índices únicos para `transactionId` e `idempotencyKey`. Se duas requisições passarem juntas pela consulta inicial, a perdedora trata `DuplicateKeyException` e recupera a operação vencedora. O `@Version` impede que uma atualização antiga sobrescreva silenciosamente a mais nova.
 
 ## Como este projeto poderia escalar?
 
-Os serviços devem permanecer sem sessão local para permitir múltiplas instâncias atrás de um balanceador. Antes de simplesmente adicionar réplicas, seria necessário proteger a Saga contra processamento concorrente, medir gargalos e testar carga.
+Os serviços não mantêm sessão local e podem receber múltiplas instâncias atrás de um balanceador. Antes de adicionar réplicas, o roteiro k6 mede erros e latência p95; outro teste dispara dez requisições com a mesma identidade para validar a concorrência.
 
-Evoluções planejadas:
+Já foram implementados índices únicos, tratamento da corrida de insert, optimistic locking e contadores do Resilience4j. Próximas evoluções condicionadas a métricas:
 
-- teste concorrente com a mesma chave de idempotência;
-- optimistic locking ou claim atômico da Saga;
 - rate limiting e bulkhead;
-- métricas e tracing distribuído;
+- dashboards e tracing distribuído;
+- MongoDB com alta disponibilidade;
 - mensageria e Outbox Pattern quando houver necessidade real de processamento assíncrono.
+
+Kafka, Kubernetes e sharding não foram adicionados porque o laboratório ainda não apresenta volume ou requisito operacional que justifique esse custo.
 
 ## O projeto está pronto para produção?
 
-Não. Ele é um laboratório intencionalmente pequeno para estudar decisões. Ainda faltam autenticação, autorização por proprietário, secrets, TLS, auditoria de segurança, observabilidade completa, recuperação operacional e testes de carga.
+Não. Ele é um laboratório intencionalmente pequeno para estudar decisões. Já existem testes de carga locais, proteção concorrente e contadores sanitizados; ainda faltam autenticação, autorização por proprietário, secrets, TLS, auditoria de segurança, observabilidade histórica, alta disponibilidade e recuperação operacional.
 
 Reconhecer esses limites faz parte da solução. A qualidade de uma arquitetura também depende de saber quais riscos foram aceitos e quais serão tratados na próxima etapa.

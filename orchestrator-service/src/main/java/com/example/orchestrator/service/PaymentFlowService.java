@@ -9,9 +9,12 @@ import com.example.orchestrator.repository.PaymentSagaRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -43,12 +46,22 @@ public class PaymentFlowService {
             correlationId = UUID.randomUUID().toString();
         }
         Instant now = Instant.now();
-        PaymentSaga saga = sagaRepository.save(new PaymentSaga(
-                null, transactionId, idempotencyKey, amount, PaymentSaga.Status.PROCESSING,
-                PaymentSaga.Step.STARTED, null, correlationId, now, now
-        ));
-        boolean transferAttempted = false;
+        PaymentSaga saga;
+        try {
+            saga = sagaRepository.save(new PaymentSaga(
+                    null, transactionId, idempotencyKey, amount, PaymentSaga.Status.PROCESSING,
+                    PaymentSaga.Step.STARTED, null, correlationId, now, now, null
+            ));
+        } catch (DuplicateKeyException duplicateKeyException) {
+            PaymentSaga winner = findExisting(transactionId, amount, idempotencyKey);
+            if (winner == null) {
+                throw duplicateKeyException;
+            }
+            log.info("Concurrent Saga already claimed transactionId={}", transactionId);
+            return winner;
+        }
 
+        boolean transferAttempted = false;
         try {
             paymentClient.create(transactionId, amount, idempotencyKey);
             paymentClient.updateStatus(transactionId, "PROCESSING");
@@ -81,12 +94,25 @@ public class PaymentFlowService {
     private PaymentSaga findExisting(String transactionId, BigDecimal amount, String idempotencyKey) {
         PaymentSaga byKey = sagaRepository.findByIdempotencyKey(idempotencyKey).orElse(null);
         if (byKey != null) {
-            if (!byKey.transactionId().equals(transactionId) || byKey.amount().compareTo(amount) != 0) {
-                throw new IdempotencyConflictException();
-            }
-            return byKey;
+            return validateSameRequest(byKey, transactionId, amount, idempotencyKey);
         }
-        return sagaRepository.findByTransactionId(transactionId).orElse(null);
+
+        PaymentSaga byTransaction = sagaRepository.findByTransactionId(transactionId).orElse(null);
+        if (byTransaction != null) {
+            return validateSameRequest(byTransaction, transactionId, amount, idempotencyKey);
+        }
+        return null;
+    }
+
+    private PaymentSaga validateSameRequest(PaymentSaga existing, String transactionId,
+                                            BigDecimal amount, String idempotencyKey) {
+        boolean sameRequest = Objects.equals(existing.transactionId(), transactionId)
+                && Objects.equals(existing.idempotencyKey(), idempotencyKey)
+                && existing.amount().compareTo(amount) == 0;
+        if (!sameRequest) {
+            throw new IdempotencyConflictException();
+        }
+        return existing;
     }
 
     private PaymentSaga handleFailure(PaymentSaga saga, String transactionId,
