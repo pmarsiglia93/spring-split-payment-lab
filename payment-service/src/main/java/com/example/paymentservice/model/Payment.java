@@ -63,4 +63,8 @@ public class Payment {
     public Instant getCreatedAt() {
         return createdAt;
     }
+
+    public void updateStatus(PaymentStatus status) {
+        this.status = status;
+    }
 }

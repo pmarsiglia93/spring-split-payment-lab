@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>com.example</groupId>
-    <artifactId>payment-service</artifactId>
+    <artifactId>transfer-service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>payment-service</name>
-    <description>Payment service for the spring split payment lab</description>
+    <name>transfer-service</name>
+    <description>Transfer service for the spring split payment lab</description>
 
     <properties>
         <java.version>21</java.version>

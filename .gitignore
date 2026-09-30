@@ -1,4 +1,7 @@
 **/target/
+**/node_modules/
+**/dist/
+**/.github/modernize/
 .idea/
 *.iml
 .vscode/

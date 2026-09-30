@@ -40,4 +40,10 @@ public class PaymentService {
         return paymentRepository.findByTransactionId(transactionId)
                 .orElseThrow(() -> new PaymentNotFoundException(transactionId));
     }
+
+    public Payment updateStatus(String transactionId, PaymentStatus status) {
+        Payment payment = findByTransactionId(transactionId);
+        payment.updateStatus(status);
+        return paymentRepository.save(payment);
+    }
 }

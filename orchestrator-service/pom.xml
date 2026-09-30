@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>com.example</groupId>
-    <artifactId>payment-service</artifactId>
+    <artifactId>orchestrator-service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>payment-service</name>
-    <description>Payment service for the spring split payment lab</description>
+    <name>orchestrator-service</name>
+    <description>Orchestrator service for the spring split payment lab</description>
 
     <properties>
         <java.version>21</java.version>
@@ -37,6 +37,16 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.4.0</version>
         </dependency>
 
         <dependency>

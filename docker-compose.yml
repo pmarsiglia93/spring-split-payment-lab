@@ -1,0 +1,67 @@
+services:
+  mongodb:
+    image: mongo:8
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  payment-service:
+    build: ./payment-service
+    ports:
+      - "8181:8081"
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/paymentdb
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  split-service:
+    build: ./split-service
+    ports:
+      - "8082:8082"
+
+  transfer-service:
+    build: ./transfer-service
+    ports:
+      - "8083:8083"
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/transferdb
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  orchestrator-service:
+    build: ./orchestrator-service
+    ports:
+      - "8080:8080"
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/orchestratordb
+      PAYMENT_SERVICE_URL: http://payment-service:8081
+      SPLIT_SERVICE_URL: http://split-service:8082
+      TRANSFER_SERVICE_URL: http://transfer-service:8083
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      payment-service:
+        condition: service_started
+      split-service:
+        condition: service_started
+      transfer-service:
+        condition: service_started
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      orchestrator-service:
+        condition: service_started
+
+volumes:
+  mongo-data:
