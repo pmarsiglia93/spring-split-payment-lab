@@ -5,12 +5,18 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/frontend"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -19,30 +25,5 @@ updates:
 
   - package-ecosystem: docker
     directory: "/"
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: "/frontend"
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: "/payment-service"
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: "/split-service"
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: "/transfer-service"
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: "/orchestrator-service"
     schedule:
       interval: weekly
