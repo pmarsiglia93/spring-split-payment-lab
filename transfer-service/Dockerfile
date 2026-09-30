@@ -4,7 +4,7 @@ COPY pom.xml .
 COPY src src
 RUN mvn -q -DskipTests package
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 WORKDIR /app
 COPY --from=build /workspace/target/transfer-service-*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
