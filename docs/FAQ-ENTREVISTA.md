@@ -22,6 +22,10 @@ Não basta dizer “eu atualizaria a biblioteca”. Uma CVE crítica em um códi
 - **Validação:** DTOs rejeitam entradas inválidas antes da regra de negócio.
 - **Erros controlados:** exceptions são convertidas em respostas HTTP sem stack trace para o cliente.
 
+### Exemplo encontrado pelo próprio laboratório
+
+Na primeira execução, o CodeQL apontou endpoints Actuator além do necessário e um valor externo chegando ao log sem remover quebras de linha. A correção restringiu o Actuator apenas a `health` e neutralizou `\n` e `\r` antes do log. Isso demonstra o ciclo completo: a ferramenta detecta, mas uma pessoa ainda precisa analisar o contexto, escolher a correção e testar novamente.
+
 ### O que faltaria em produção
 
 - autenticação e autorização;

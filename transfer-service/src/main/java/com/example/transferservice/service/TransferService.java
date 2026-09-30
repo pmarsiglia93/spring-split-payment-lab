@@ -35,7 +35,8 @@ public class TransferService {
     }
 
     public TransferBatch compensate(String transactionId) {
-        log.warn("Compensating transfers transactionId={}", transactionId);
+        String safeTransactionId = transactionId.replace('\n', '_').replace('\r', '_');
+        log.warn("Compensating transfers transactionId={}", safeTransactionId);
         TransferBatch batch = find(transactionId);
         if (batch.status() == TransferStatus.COMPENSATED) {
             return batch;
